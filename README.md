@@ -1,228 +1,244 @@
 # Windows Server 2025 — Backup Lab
 
-Практическая лабораторная работа по изучению трёх типов резервного копирования в Windows Server 2025 Standard Evaluation:
+## Описание проекта
+
+В этом лабораторном проекте показана настройка резервного копирования на **Windows Server 2025 Standard Evaluation** с использованием трёх подходов:
 
 - **Full Backup** — полное резервное копирование.
-- **Incremental Backup** — инкрементное резервное копирование.
+- **Incremental Backup** — инкрементальное резервное копирование.
 - **Differential Backup** — дифференциальное резервное копирование.
 
-В проекте представлены пошаговая инструкция, скриншоты выполнения команд и готовые архивы резервных копий, которые можно скачать и использовать для практики восстановления данных.
+Для выполнения лабораторной работы использовались PowerShell и Robocopy.
 
-## Содержание
-
-1. [Окружение](#окружение)
-2. [Подготовка системы](#подготовка-системы)
-3. [Создание тестовых данных](#создание-тестовых-данных)
-4. [Full Backup](#1-full-backup)
-5. [Incremental Backup](#2-incremental-backup)
-6. [Differential Backup](#3-differential-backup)
-7. [Проверка резервных копий](#проверка-резервных-копий)
-8. [Восстановление данных из готового архива](#восстановление-данных-из-готового-архива)
-
----
-
-## Окружение
+## 1. Используемая среда
 
 - ОС: Windows Server 2025 Standard Evaluation
 - Виртуальная машина: Oracle VirtualBox
+- Имя сервера: `SRV-BACKUP01`
 - Исходные данные: `C:\ImportantData`
 - Диск для резервных копий: `E:\BackupFiles`
-- Файловая система: NTFS
 
-## Подготовка системы
+## 2. Подготовка сервера
 
-Перед началом необходимо:
+Устанавливаем Windows Server 2025 и выполняем первоначальную настройку системы.
 
-1. Установить Windows Server 2025.
-2. Подключить дополнительный виртуальный диск.
-3. Инициализировать и отформатировать его в NTFS.
-4. Установить компонент Windows Server Backup (если используется в рамках дополнительной практики).
-5. Создать папку для резервных копий.
+![Установка Windows Server 2025](screenshots/01-windows-server-2025.png)
 
-Скриншоты подготовки системы находятся в папке `screenshots/`.
+Проверяем доступные диски и убеждаемся, что дополнительный диск подключён.
 
-## Создание тестовых данных
+![Проверка дисков](screenshots/02-disk-check.png)
 
-Создадим исходную структуру:
+Создаём раздел на дополнительном диске, форматируем его в NTFS и присваиваем метку `BACKUP`.
 
-```powershell
-New-Item -ItemType Directory -Path "C:\ImportantData\Documents" -Force
-New-Item -ItemType Directory -Path "C:\ImportantData\Projects" -Force
-New-Item -ItemType Directory -Path "C:\ImportantData\Images" -Force
+![Создание и форматирование диска](screenshots/03-disk-creation-and-formatting.png)
 
-Set-Content "C:\ImportantData\Documents\Instructions.txt" "Backup lab instructions"
-Set-Content "C:\ImportantData\Documents\Report.txt" "Initial report"
-Set-Content "C:\ImportantData\Projects\Project.txt" "Initial project"
+Устанавливаем необходимую роль Windows Server Backup через Server Manager.
+
+![Установка роли](screenshots/04-role-installation.png)
+
+## 3. Создание исходных данных
+
+Создаём папку `C:\ImportantData` и тестовые файлы:
+
+```text
+C:\ImportantData
+├── Documents
+│   ├── Instructions.txt
+│   └── Report.txt
+└── Projects
+    └── Project.txt
 ```
 
-## 1. Full Backup
+Эти файлы будут использоваться для проверки резервного копирования и восстановления.
 
-Полное резервное копирование сохраняет все файлы из исходной папки.
+![Исходные данные](screenshots/05-source-data.png)
+
+Создаём папку для хранения резервных копий:
+
+```powershell
+New-Item -Path "E:\BackupFiles" -ItemType Directory -Force
+```
+
+## 4. Full Backup — полное резервное копирование
+
+Полная резервная копия содержит все исходные файлы.
+
+Выполняем команду:
 
 ```powershell
 robocopy "C:\ImportantData" "E:\BackupFiles\Full" /E /COPY:DAT /R:2 /W:2 /TEE
 ```
 
-Проверить содержимое:
+Параметры:
+- `/E` — копирование всех папок, включая пустые.
+- `/COPY:DAT` — копирование данных, атрибутов и времени изменения.
+- `/R:2` — две повторные попытки при ошибке.
+- `/W:2` — ожидание две секунды между попытками.
+- `/TEE` — вывод результата в консоль.
 
-```powershell
-Get-ChildItem "E:\BackupFiles\Full" -Recurse
-```
+![Результат полного резервного копирования](screenshots/06-full-backup.png)
 
-## 2. Incremental Backup
+## 5. Incremental Backup — инкрементальное резервное копирование
 
-Инкрементное резервное копирование сохраняет файлы, отмеченные атрибутом Archive.
+Инкрементальная копия сохраняет файлы, которые изменились после предыдущего резервного копирования.
 
-Сначала сбросим атрибут Archive:
+Сначала сбрасываем Archive-атрибут у исходных файлов:
 
 ```powershell
 attrib -A C:\ImportantData\* /S
 ```
 
-Изменим несколько файлов:
+Изменяем несколько файлов:
 
 ```powershell
-Add-Content "C:\ImportantData\Documents\Instructions.txt" "Incremental backup test"
-Add-Content "C:\ImportantData\Projects\Project.txt" "Incremental backup test"
+Add-Content "C:\ImportantData\Documents\Instructions.txt" "Incremental backup second test"
+
+Add-Content "C:\ImportantData\Projects\Project.txt" "Incremental backup second test"
 ```
 
-Создадим инкрементную копию:
+Создаём инкрементальную копию:
 
 ```powershell
 robocopy "C:\ImportantData" "E:\BackupFiles\Incremental\Backup_01" /E /M /COPY:DAT /R:2 /W:2 /TEE
 ```
 
-Ключ `/M` копирует файлы с атрибутом Archive и сбрасывает его после копирования.
+Параметр `/M` копирует файлы с установленным Archive-атрибутом и сбрасывает этот атрибут после успешного копирования.
 
-## 3. Differential Backup
+![Результат инкрементального резервного копирования](screenshots/07-incremental-backup.png)
 
-Дифференциальная копия должна содержать все изменения относительно исходной полной копии.
+## 6. Differential Backup — дифференциальное резервное копирование
 
-Сначала создадим базовую копию:
+Дифференциальная копия должна содержать изменения относительно первоначальной полной копии.
+
+Сначала создаём базовую копию Full:
 
 ```powershell
 robocopy "E:\BackupFiles\Full" "E:\BackupFiles\Differential\Backup_01" /E /COPY:DAT /R:2 /W:2
 ```
 
-Затем добавим в неё изменённые файлы из источника:
+Затем добавляем в неё изменённые файлы из исходной папки:
 
 ```powershell
 robocopy "C:\ImportantData" "E:\BackupFiles\Differential\Backup_01" /E /XO /COPY:DAT /R:2 /W:2 /TEE
 ```
 
-В этой лабораторной работе используется имитация дифференциального копирования средствами Robocopy, а не штатный механизм Windows Server Backup.
+Параметр `/XO` пропускает файлы, которые старше файлов в папке назначения. Таким образом, в базовой копии обновляются более новые версии файлов.
 
-## Проверка резервных копий
+В результате папка Differential содержит исходные файлы Full и актуальные версии изменённых файлов.
 
-Для проверки целостности можно использовать SHA256:
+![Результат дифференциального резервного копирования](screenshots/08-differential-backup.png)
+
+## 7. Проверка целостности файлов
+
+Для проверки используем алгоритм SHA256.
+
+Пример команды для исходного файла:
 
 ```powershell
 Get-FileHash "C:\ImportantData\Documents\Instructions.txt" -Algorithm SHA256
 ```
 
-Сравните хеши исходных файлов и файлов из резервной копии.
+Сравниваем хеши исходных файлов и файлов в дифференциальной копии.
 
-Для просмотра содержимого:
+Совпадение SHA256 означает, что содержимое соответствующих файлов идентично.
 
-```powershell
-Get-ChildItem "E:\BackupFiles" -Recurse
-```
+![Проверка SHA256](screenshots/09-sha256-verification.png)
 
-## Восстановление данных из готового архива
+## 8. Проверка восстановления Full Backup
 
-В репозитории находится ZIP-архив с тремя видами резервных копий:
-
-`backups/Windows-Server-Backups.zip`
-
-### Шаг 1. Скачать архив
-
-Скачайте `Windows-Server-Backups.zip` из папки `backups` этого репозитория.
-
-### Шаг 2. Распаковать архив
-
-Например, в папку `C:\BackupRestore`:
+Проверяем восстановление полной резервной копии в отдельную папку:
 
 ```powershell
-Expand-Archive -Path ".\Windows-Server-Backups.zip" -DestinationPath "C:\BackupRestore" -Force
+robocopy "E:\BackupFiles\Full" "C:\RestoreTest\Full" /E /COPY:DAT /R:2 /W:2 /TEE
 ```
 
-### Шаг 3. Выбрать нужную копию
+После выполнения проверяем наличие восстановленных папок и файлов.
 
-После распаковки будут доступны:
+![Восстановление полной резервной копии](screenshots/10-full-restoration.png)
 
-- `Full/` — полная резервная копия.
-- `Incremental/Backup_01/` — инкрементная копия.
-- `Differential/Backup_01/` — дифференциальная копия.
+В лабораторной работе было проверено восстановление Full Backup. Восстановление Incremental и Differential описано ниже как инструкция для самостоятельной проверки.
 
-**Важно:** для восстановления из инкрементной копии необходима исходная полная копия и все последующие инкрементные копии по порядку. В нашем архиве представлена одна инкрементная копия.
+## 9. Скачать готовые резервные копии
 
-Для дифференциального восстановления необходима исходная полная копия и последняя дифференциальная копия.
+Для удобства подготовлен ZIP-архив со всеми тремя вариантами резервного копирования.
 
-### Шаг 4. Восстановить файлы
+**[Скачать Windows-Server-Backups.zip](backups/Windows-Server-Backups.zip)**
 
-Для восстановления полной копии:
+После скачивания распакуйте архив. Внутри находятся папки:
+
+```text
+Windows-Server-Backups
+├── Full
+├── Incremental
+│   └── Backup_01
+└── Differential
+    └── Backup_01
+```
+
+## 10. Как восстановить файлы из ZIP-архива
+
+### Шаг 1. Распаковать архив
+
+Например, если ZIP-файл находится в папке Downloads, откройте PowerShell и выполните:
+
+```powershell
+Expand-Archive -Path "$env:USERPROFILE\Downloads\Windows-Server-Backups.zip" -DestinationPath "C:\BackupRestore" -Force
+```
+
+### Шаг 2. Восстановить Full Backup
 
 ```powershell
 robocopy "C:\BackupRestore\Full" "C:\RestoredData\Full" /E /COPY:DAT /R:2 /W:2
 ```
 
-Для восстановления инкрементной копии:
+В папке `C:\RestoredData\Full` появятся файлы из полной резервной копии.
 
-Сначала восстановите Full, затем примените Incremental:
+### Шаг 3. Восстановить Incremental Backup
+
+Сначала необходимо восстановить полную копию:
 
 ```powershell
 robocopy "C:\BackupRestore\Full" "C:\RestoredData\Incremental" /E /COPY:DAT /R:2 /W:2
+```
 
+Затем применить инкрементальную копию поверх полной:
+
+```powershell
 robocopy "C:\BackupRestore\Incremental\Backup_01" "C:\RestoredData\Incremental" /E /COPY:DAT /R:2 /W:2
 ```
 
-Для восстановления дифференциальной копии:
+В результате получится набор файлов с учётом изменений из Incremental Backup.
 
-Сначала восстановите Full, затем примените Differential:
+### Шаг 4. Восстановить Differential Backup
+
+Сначала восстанавливаем полную копию:
 
 ```powershell
 robocopy "C:\BackupRestore\Full" "C:\RestoredData\Differential" /E /COPY:DAT /R:2 /W:2
+```
 
+Затем применяем дифференциальную копию:
+
+```powershell
 robocopy "C:\BackupRestore\Differential\Backup_01" "C:\RestoredData\Differential" /E /COPY:DAT /R:2 /W:2
 ```
 
-### Шаг 5. Проверить восстановленные данные
+В результате получится набор файлов с учётом изменений из Differential Backup.
 
-```powershell
-Get-ChildItem "C:\RestoredData" -Recurse
-```
+> Важно: для восстановления Incremental и Differential сначала требуется Full Backup. Приведённые команды рассчитаны на структуру папок из приложенного ZIP-архива.
 
-Для дополнительной проверки сравните SHA256 исходных и восстановленных файлов.
+## 11. Итог
 
----
+В ходе лабораторной работы были выполнены:
 
-## Структура проекта
+- Подготовка Windows Server 2025.
+- Подключение и настройка диска для резервных копий.
+- Создание исходных тестовых данных.
+- Полное резервное копирование (Full).
+- Инкрементальное резервное копирование (Incremental).
+- Дифференциальное резервное копирование (Differential).
+- Проверка целостности файлов с помощью SHA256.
+- Проверка восстановления полной резервной копии.
+- Подготовка ZIP-архива с резервными копиями и инструкции по восстановлению.
 
-```text
-Windows-Server-Backup-Lab/
-│
-├── README.md
-│
-├── backups/
-│   └── Windows-Server-Backups.zip
-│
-└── screenshots/
-    ├── 01-windows-server-2025.png
-    ├── 02-disk-check.png
-    ├── 03-disk-creation-and-formatting.png
-    ├── 04-role-installation.png
-    ├── 05-source-data.png
-    ├── 06-full-backup.png
-    ├── 07-incremental-backup.png
-    ├── 08-differential-backup.png
-    ├── 09-sha256-verification.png
-    └── 10-full-restoration.png
-```
-
-## Заключение
-
-В ходе лабораторной работы были изучены три подхода к резервному копированию: Full, Incremental и Differential.
-
-Также были подготовлены готовые примеры резервных копий, которые можно скачать, распаковать и использовать для самостоятельной практики восстановления данных.
-
-Проект предназначен для обучения и демонстрации базовых принципов резервного копирования в Windows Server 2025.
+Проект демонстрирует базовые принципы резервного копирования и восстановления данных в Windows Server 2025.
